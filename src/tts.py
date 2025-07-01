@@ -2,11 +2,23 @@ import requests
 import sounddevice as sd
 import soundfile as sf
 import io
+import numpy as np
+import sys
 from config import settings
+
+def print_volume_meter(rms_value, width=50):
+    """Prints a simple text-based volume meter."""
+    # Scale the RMS value to a more reasonable range for visualization
+    # This is an arbitrary scaling factor, adjust as needed
+    scaled_rms = rms_value * 10  # Adjust this scaling factor to your liking
+    volume = min(int(scaled_rms * width), width)
+    bar = '█' * volume + '-' * (width - volume)
+    sys.stdout.write(f'\rOutput: [{bar}]')
+    sys.stdout.flush()
 
 def text_to_speech_and_play(text, lang_code=None):
     """
-    Sends text to the Kokoro-FastAPI and plays the returned audio.
+    Sends text to the Kokoro-FastAPI and plays the returned audio with a volume meter.
     Args:
         text (str): The text to convert to speech.
         lang_code (str, optional): The language code for speech generation.
@@ -29,27 +41,27 @@ def text_to_speech_and_play(text, lang_code=None):
     try:
         response = requests.post(settings.KOKORO_URL, headers=headers, json=data)
         response.raise_for_status()
-        
-        print(f"Kokoro-FastAPI Content-Type: {response.headers.get('Content-Type')}")
-        print(f"Kokoro-FastAPI Response Content Length: {len(response.content)} bytes")
 
         try:
-            # Read the audio data from the response
             audio_data, samplerate = sf.read(io.BytesIO(response.content))
             
-            # Play the audio
+            # Ensure audio is in a playable format (e.g., float32)
+            if audio_data.dtype != 'float32':
+                audio_data = audio_data.astype(np.float32)
+
             print("Playing response...")
-            sd.play(audio_data, samplerate)
-            sd.wait()
+            with sd.OutputStream(samplerate=samplerate, channels=audio_data.shape[1] if audio_data.ndim > 1 else 1, dtype='float32') as stream:
+                block_size = 1024
+                for i in range(0, len(audio_data), block_size):
+                    block = audio_data[i:i+block_size]
+                    stream.write(block)
+                    rms = np.sqrt(np.mean(block**2))
+                    print_volume_meter(rms)
+            sys.stdout.write('\n')
+            sys.stdout.flush()
             print("Finished playing response.")
         except Exception as e:
             print(f"An error occurred while playing the audio: {e}")
-            error_file_path = "kokoro_response_error.bin"
-            with open(error_file_path, "wb") as f:
-                f.write(response.content)
-            print(f"Raw Kokoro-FastAPI response content saved to {error_file_path} for inspection.")
 
     except requests.exceptions.RequestException as e:
         print(f"Error making request to Kokoro-FastAPI: {e}")
-        if e.response is not None:
-            print(f"Kokoro-FastAPI Response Content: {e.response.text}")
