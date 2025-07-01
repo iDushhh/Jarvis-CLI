@@ -10,8 +10,16 @@ def record_audio_vad():
     Returns the recorded audio as a NumPy array.
     """
     vad = webrtcvad.Vad(settings.VAD_AGGRESSIVENESS)
-    frames = collections.deque()
-    ring_buffer = collections.deque(maxlen=int(settings.SILENCE_LIMIT_MS / settings.FRAME_DURATION_MS))
+    
+    # Buffer for detecting the start of speech
+    startup_buffer_duration_ms = 500  # 500ms buffer for startup
+    startup_buffer_size = int(startup_buffer_duration_ms / settings.FRAME_DURATION_MS)
+    startup_buffer = collections.deque(maxlen=startup_buffer_size)
+    
+    # Buffer for detecting the end of speech
+    silence_buffer_size = int(settings.SILENCE_LIMIT_MS / settings.FRAME_DURATION_MS)
+    silence_buffer = collections.deque(maxlen=silence_buffer_size)
+
     recorded_audio = []
     speaking = False
     triggered = False
@@ -29,20 +37,26 @@ def record_audio_vad():
             is_speech = vad.is_speech(frame_data.tobytes(), settings.SAMPLERATE)
 
             if not speaking:
-                ring_buffer.append((frame_data, is_speech))
-                num_voiced = len([f for f, speech in ring_buffer if speech])
-                if num_voiced > 0.9 * ring_buffer.maxlen: # 90% of frames are speech
+                startup_buffer.append((frame_data, is_speech))
+                num_voiced = len([f for f, speech in startup_buffer if speech])
+                
+                # Start recording if 50% of the startup buffer is speech
+                if num_voiced > 0.5 * startup_buffer.maxlen: 
                     speaking = True
                     triggered = True
                     print("Speech detected, recording...")
-                    for f, s in ring_buffer:
+                    # Transfer the startup buffer to the recorded audio
+                    for f, s in startup_buffer:
                         recorded_audio.append(f)
-                    ring_buffer.clear()
+                        silence_buffer.append((f,s)) # also fill the silence buffer
+                    startup_buffer.clear()
             else:
                 recorded_audio.append(frame_data)
-                ring_buffer.append((frame_data, is_speech))
-                num_unvoiced = len([f for f, speech in ring_buffer if not speech])
-                if num_unvoiced > 0.9 * ring_buffer.maxlen: # 90% of frames are silence
+                silence_buffer.append((frame_data, is_speech))
+                num_unvoiced = len([f for f, speech in silence_buffer if not speech])
+                
+                # Stop recording if 90% of the silence buffer is silence
+                if num_unvoiced > 0.9 * silence_buffer.maxlen: 
                     speaking = False
                     print("Silence detected, stopping recording.")
                     break

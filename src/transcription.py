@@ -4,6 +4,9 @@ import soundfile as sf
 import io
 from config import settings
 
+# Load the model once
+model = WhisperModel(settings.WHISPER_MODEL_SIZE, device=settings.WHISPER_DEVICE, compute_type=settings.WHISPER_COMPUTE_TYPE)
+
 def transcribe_audio(audio_data, samplerate=settings.SAMPLERATE):
     """
     Transcribes audio data using faster-whisper.
@@ -24,7 +27,6 @@ def transcribe_audio(audio_data, samplerate=settings.SAMPLERATE):
     sf.write(audio_buffer, audio_float32, samplerate, format='WAV')
     audio_buffer.seek(0)
 
-    model = WhisperModel(settings.WHISPER_MODEL_SIZE, device=settings.WHISPER_DEVICE, compute_type=settings.WHISPER_COMPUTE_TYPE)
     segments, info = model.transcribe(audio_buffer, beam_size=5)
     detected_language = info.language
     print("Transcription language:", detected_language)
